@@ -1,5 +1,7 @@
 #include"memory/PoolAllocator.h"
 #include"common/Assert.h"
+#include<new>
+#include<cstdint>
 
 namespace
 {
