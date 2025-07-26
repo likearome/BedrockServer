@@ -20,9 +20,17 @@ namespace BedrockServer::Core::Memory
         PoolAllocator(std::size_t blockSize, std::size_t blockCount);
         ~PoolAllocator();
 
+        // --- START: Rule of Five Implementation ---
+        
         // Non-copyable.
         PoolAllocator(const PoolAllocator& other) = delete;
         PoolAllocator& operator=(const PoolAllocator& other) = delete;
+
+        // Movable.
+        PoolAllocator(PoolAllocator&& other) noexcept;
+        PoolAllocator& operator=(PoolAllocator&& other) noexcept;
+
+        // --- END: Rule of Five Implementation ---
 
         void* Allocate();
         void Deallocate(void* pBlock);
@@ -32,5 +40,6 @@ namespace BedrockServer::Core::Memory
         FreeNode* free_list_head_ = nullptr; // Head of the free list.
         std::size_t block_size_ = 0;         // Size of a single block.
         std::size_t block_count_ = 0;        // Number of blocks in the pool.
+        std::size_t payload_size_ = 0;       // The actual size requested by the user.
     };
 }
