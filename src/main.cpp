@@ -1,48 +1,32 @@
-#include "memory/SmallObjectAllocator.h"
-#include "common/Assert.h"
 #include <iostream>
-#include <cstdint> // For uint32_t
+#include<vector>
+#include "memory/MemoryTracker.h"
+#include "memory/Memory.h" // The ONLY memory header we need now.
 
-// This pattern must be the same as the one in PoolAllocator.cpp
-constexpr uint32_t FENCE_PATTERN = 0xDEADBEEF;
+struct Vec3 { float x, y, z; };
 
 int main()
 {
-    std::cout << "--- Graceful Memory Fencing Test ---" << std::endl;
+    std::cout << "--- Final Integration Test ---" << std::endl;
 
-#ifdef BEDROCK_ENABLE_MEMORY_FENCING
-    std::cout << "[STATUS] Memory Fencing is ENABLED." << std::endl;
-    std::cout << "Verifying fence patterns..." << std::endl;
+    // This 'new' will be replaced by our macro: new(__FILE__, __LINE__)
+    // It will call our placement new, which tracks the allocation.
+    int* my_int = new int(5);
+    Vec3* my_vec = new Vec3{1.0f, 2.0f, 3.0f};
 
-    BedrockServer::Core::Memory::SmallObjectAllocator soa;
-    
-    const std::size_t payloadSize = 8;
-    void* pPayload = soa.Allocate(payloadSize);
-    CHECK(pPayload != nullptr);
+    // This one will be intentionally leaked.
+    int* leaked_int = new int(100);
 
-    // Get the memory addresses of the fences
-    // The prefix fence is located right before our payload pointer.
-    uint32_t* pPrefixFence = reinterpret_cast<uint32_t*>(static_cast<std::byte*>(pPayload) - sizeof(FENCE_PATTERN));
-    
-    // The suffix fence is located right after our payload.
-    uint32_t* pSuffixFence = reinterpret_cast<uint32_t*>(static_cast<std::byte*>(pPayload) + payloadSize);
+    std::cout << "Allocated an int at " << my_int << std::endl;
+    std::cout << "Allocated a Vec3 at " << my_vec << std::endl;
+    std::cout << "Allocated a leaked_int at " << leaked_int << std::endl;
 
-    // Check if the allocator correctly placed the fences.
-    if (*pPrefixFence == FENCE_PATTERN && *pSuffixFence == FENCE_PATTERN)
-    {
-        std::cout << "[RESULT] SUCCESS: Both fences are correctly placed." << std::endl;
-    }
-    else
-    {
-        std::cout << "[RESULT] FAILURE: Fences are missing or incorrect." << std::endl;
-    }
+    // These deletes will also be handled by our system.
+    delete my_int;
+    delete my_vec;
 
-    soa.Deallocate(pPayload, payloadSize);
-
-#else
-    std::cout << "[STATUS] Memory Fencing is DISABLED." << std::endl;
-    std::cout << "[RESULT] Test skipped." << std::endl;
-#endif
+    // Report leaks at the end of the program.
+    BedrockServer::Core::Memory::MemoryTracker::GetInstance().ReportLeaks();
 
     return 0;
 }

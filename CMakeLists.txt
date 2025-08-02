@@ -13,9 +13,17 @@ add_subdirectory(core)
 # Make executable named "BedrockServer" 
 add_executable(BedrockServer src/main.cpp)
 
+target_sources(BedrockServer
+    PRIVATE
+    core/memory/GlobalAllocators.cpp
+)
+
 # link bedrock_memory library to BedrockServer executable
 target_link_libraries(BedrockServer PRIVATE bedrock_core)
-# BedrockServer
+
+# Add _DEBUG definition for Debug builds
+target_compile_definitions(BedrockServer PRIVATE $<$<CONFIG:Debug>:_DEBUG>)
+target_compile_definitions(bedrock_core PRIVATE $<$<CONFIG:Debug>:_DEBUG>)
 
 # Add an option to control memory fencing (default is ON for debug builds)
 option(ENABLE_MEMORY_FENCING "Enable memory fencing check for debugging" ON)
@@ -24,6 +32,9 @@ if(ENABLE_MEMORY_FENCING)
     # Pass the definition to all targets
     add_compile_definitions(BEDROCK_ENABLE_MEMORY_FENCING)
 endif()
+
+# BedrockServer
+
 
 # =======================================================
 # Unit Testing Setup using Google Test

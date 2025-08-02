@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <array>
 #include "common/ServerConfig.h"
+#include "memory/SystemAllocator.h"
 
 namespace BedrockServer::Core::Memory
 {
@@ -22,12 +23,20 @@ namespace BedrockServer::Core::Memory
     class MemoryTracker
     {
     private:
+        // The map now uses our SystemAllocator, breaking the recursion.
+        using AllocationMap = std::map<
+            void*, 
+            AllocationInfo, 
+            std::less<void*>, 
+            SystemAllocator<std::pair<void* const, AllocationInfo>>
+        >;
         /// @struct PerThreadData
         /// @brief Holds the allocation map for a single thread
         /// using alignas to prevent false sharing
         struct alignas(64) PerThreadData
         {
-            std::map<void*, AllocationInfo> allocations;
+            //std::map<void*, AllocationInfo> allocations;
+            AllocationMap allocations;
         };
     public:
         // Get the singleton instance

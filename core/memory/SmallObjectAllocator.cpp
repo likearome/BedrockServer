@@ -1,5 +1,8 @@
 #include"SmallObjectAllocator.h"
 #include"common/Assert.h"
+#include"common/ServerConfig.h"
+#include<cstdlib>
+#include<new>
 
 namespace
 {
@@ -7,8 +10,6 @@ namespace
     
     // All allocation sizes are aligned to this value.
     constexpr std::size_t POOL_ALIGNMENT = 8;
-    // If requested size is bigger than this, use general allocator.
-    constexpr std::size_t MAX_SMALL_OBJECT_SIZE = 256;
     // How many blocks for each pool. e.g. 8-byte pool has 1024 blocks.
     constexpr std::size_t NUM_BLOCKS_PER_POOL = 1024;
 }
@@ -17,24 +18,38 @@ namespace BedrockServer::Core::Memory
 {
     SmallObjectAllocator::SmallObjectAllocator()
     {
-        // up to MAX_SMALL_OBJECT_SIZE
-        const std::size_t numPools = MAX_SMALL_OBJECT_SIZE / POOL_ALIGNMENT;
-        pools_.reserve(numPools);
+        num_pools_ = ServerConfig::MAX_SMALL_OBJECT_SIZE / POOL_ALIGNMENT;
+        
+        // Use std::malloc to avoid calling our global `new` during initialization.
+        void* pMemory = std::malloc(num_pools_ * sizeof(PoolAllocator));
+        CHECK(pMemory != nullptr);
+        
+        pools_ = static_cast<PoolAllocator*>(pMemory);
 
-        for(std::size_t i = 1; i <= numPools; ++i)
+        // Construct PoolAllocator objects in-place using placement new.
+        for (std::size_t i = 0; i < num_pools_; ++i)
         {
-            // fill pools by i * POOL_ALIGNMENT;
-            std::size_t payloadSize = i * POOL_ALIGNMENT;
-            pools_.emplace_back(payloadSize, NUM_BLOCKS_PER_POOL);
+            std::size_t payloadSize = (i + 1) * POOL_ALIGNMENT;
+            new (&pools_[i]) PoolAllocator(payloadSize, NUM_BLOCKS_PER_POOL);
         }
     }
 
-    SmallObjectAllocator::~SmallObjectAllocator() = default;
+    SmallObjectAllocator::~SmallObjectAllocator()
+    {
+        // Manually call destructors for objects created with placement new.
+        for (std::size_t i = 0; i < num_pools_; ++i)
+        {
+            pools_[i].~PoolAllocator();
+        }
+        
+        // Free the raw memory.
+        std::free(pools_);
+    }
 
     void* SmallObjectAllocator::Allocate(std::size_t size)
     {
         // It cannot allocate to use SmallObjectAllocator
-        if(0 == size || size > MAX_SMALL_OBJECT_SIZE)
+        if(0 == size || size > ServerConfig::MAX_SMALL_OBJECT_SIZE)
         {
             return nullptr;
         }
@@ -42,22 +57,21 @@ namespace BedrockServer::Core::Memory
         // Calculate which pool to use from size
         // ex) size 1~8  -> pools_[0] (8bytes)
         // ex) size 9~16 -> pools_[1] (16bytes)
-        std::size_t index = ((size + POOL_ALIGNMENT - 1) / POOL_ALIGNMENT) - 1; // ((size + 7) / 8) - 1
-        CHECK(index < pools_.size());
+        std::size_t index = ((size + POOL_ALIGNMENT - 1) / POOL_ALIGNMENT) - 1;
+        CHECK(index < num_pools_);
 
         return pools_[index].Allocate();
     }
 
     void SmallObjectAllocator::Deallocate(void* pBlock, std::size_t size)
     {
-        if(nullptr == pBlock  || 0 == size || size > MAX_SMALL_OBJECT_SIZE)
+        if(nullptr == pBlock  || 0 == size || size > ServerConfig::MAX_SMALL_OBJECT_SIZE)
         {
             return ;
         }
 
-        std::size_t index = ((size + POOL_ALIGNMENT - 1) / POOL_ALIGNMENT) - 1; // ((size + 7) / 8) - 1
-        CHECK(index < pools_.size());
-
+        std::size_t index = ((size + POOL_ALIGNMENT - 1) / POOL_ALIGNMENT) - 1;
+        CHECK(index < num_pools_);
         pools_[index].Deallocate(pBlock);
     }
 }

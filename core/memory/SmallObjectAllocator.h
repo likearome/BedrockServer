@@ -22,6 +22,7 @@ namespace BedrockServer::Core::Memory
 
     private:
         // We will have pools for 8 * n = 8, 16, 24, 32, 40, 48, ...
-        std::vector<PoolAllocator> pools_;
+        PoolAllocator* pools_ = nullptr;
+        std::size_t num_pools_ = 0;
     };
 }

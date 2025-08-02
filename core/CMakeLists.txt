@@ -5,6 +5,9 @@ file(GLOB_RECURSE CORE_SOURCES
     "*.cpp"
 )
 
+# GlobalAllocators.cpp is special, so we remove it from the core library.
+list(REMOVE_ITEM CORE_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/memory/GlobalAllocators.cpp)
+
 add_library(bedrock_core ${CORE_SOURCES})
 
 # Set public include directories.

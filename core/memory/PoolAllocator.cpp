@@ -2,25 +2,34 @@
 #include"common/Assert.h"
 #include<new>
 #include<cstdint>
+#include<cstdlib>
 
+#ifdef BEDROCK_ENABLE_MEMORY_FENCING
 namespace
 {
     constexpr uint32_t FENCE_PATTERN = 0xDEADBEEF;
 }
+#endif
 
 namespace BedrockServer::Core::Memory
 {
     PoolAllocator::PoolAllocator(std::size_t payloadSize, std::size_t blockCount)
         : payload_size_(payloadSize), block_count_(blockCount)
     {
+#ifdef BEDROCK_ENABLE_MEMORY_FENCING
         // the actual block size that user required needs space for the user payload + double-sided fences. 
         block_size_ = payload_size_ + (2 * sizeof(FENCE_PATTERN));
+#else
+        // without fencing, block size is just the payload size.
+        block_size_ = payload_size_;
+#endif
 
         // critical pre-conditions. These must be true in all builds.
         CHECK(payload_size_ >= sizeof(FreeNode));
         CHECK(block_count_ > 0);
 
-        memory_chunk_ = new std::byte[block_size_ * block_count_];
+        //memory_chunk_ = new std::byte[block_size_ * block_count_];
+        memory_chunk_ = static_cast<std::byte*>(std::malloc(block_size_ * block_count_));
         CHECK(memory_chunk_ != nullptr);
 
         // initialize the free list using placement new
@@ -43,7 +52,7 @@ namespace BedrockServer::Core::Memory
 
     PoolAllocator::~PoolAllocator()
     {
-        delete[] memory_chunk_;
+        std::free(memory_chunk_);
     }
 
     void* PoolAllocator::Allocate()
@@ -56,12 +65,17 @@ namespace BedrockServer::Core::Memory
         FreeNode* pBlock = static_cast<FreeNode*>(free_list_head_);
         free_list_head_ = pBlock->pNext;
 
+#ifdef BEDROCK_ENABLE_MEMORY_FENCING
         // install fence around the payload area.
         std::byte* pBlockBytes = reinterpret_cast<std::byte*>(pBlock);
         *reinterpret_cast<uint32_t*>(pBlockBytes) = FENCE_PATTERN;
         *reinterpret_cast<uint32_t*>(pBlockBytes + sizeof(FENCE_PATTERN) + payload_size_) = FENCE_PATTERN;
 
         return pBlockBytes + sizeof(FENCE_PATTERN);
+#else
+        // without fencing, just return the block pointer.
+        return pBlock;
+#endif
     }
 
     void PoolAllocator::Deallocate(void* pPayload)
@@ -70,7 +84,7 @@ namespace BedrockServer::Core::Memory
         {
             return ;
         }
-
+#ifdef BEDROCK_ENABLE_MEMORY_FENCING
         std::byte* pPayloadBytes = static_cast<std::byte*>(pPayload);
         std::byte* pBlockBytes = pPayloadBytes - sizeof(FENCE_PATTERN);
 
@@ -80,6 +94,10 @@ namespace BedrockServer::Core::Memory
         // Construct a new FreeNode at pBlock, making it point to the old head.
         FreeNode* pNewHead = new (pBlockBytes) FreeNode{free_list_head_};
         free_list_head_ = pNewHead;
+#else
+        FreeNode* pNewHead = new (pPayload) FreeNode{free_list_head_};
+        free_list_head_ = pNewHead;
+#endif
     }
 
     PoolAllocator::PoolAllocator(PoolAllocator&& other) noexcept
