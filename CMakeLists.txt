@@ -15,3 +15,11 @@ add_executable(BedrockServer src/main.cpp)
 # link bedrock_memory library to BedrockServer executable
 target_link_libraries(BedrockServer PRIVATE bedrock_core)
 # BedrockServer
+
+# Add an option to control memory fencing (default is ON for debug builds)
+option(ENABLE_MEMORY_FENCING "Enable memory fencing check for debugging" ON)
+
+if(ENABLE_MEMORY_FENCING)
+    # Pass the definition to all targets
+    add_compile_definitions(BEDROCK_ENABLE_MEMORY_FENCING)
+endif()
