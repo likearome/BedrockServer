@@ -18,7 +18,7 @@ namespace BedrockServer::Core::Memory
         SmallObjectAllocator& operator=(const SmallObjectAllocator& other) = delete;
 
         void* Allocate(std::size_t size);
-        void Deallocate(void* pBlock, std::size_t size);
+        void Deallocate(void* pPayload, std::size_t size);
 
     private:
         // We will have pools for 8 * n = 8, 16, 24, 32, 40, 48, ...

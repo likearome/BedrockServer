@@ -33,7 +33,7 @@ namespace BedrockServer::Core::Memory
         // --- END: Rule of Five Implementation ---
 
         void* Allocate();
-        void Deallocate(void* pBlock);
+        void Deallocate(void* pPayload);
 
     private:
         std::byte* memory_chunk_ = nullptr;  // Owns the pre-allocated pool memory.

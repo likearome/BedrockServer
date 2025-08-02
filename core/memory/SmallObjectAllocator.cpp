@@ -63,15 +63,15 @@ namespace BedrockServer::Core::Memory
         return pools_[index].Allocate();
     }
 
-    void SmallObjectAllocator::Deallocate(void* pBlock, std::size_t size)
+    void SmallObjectAllocator::Deallocate(void* pPayload, std::size_t size)
     {
-        if(nullptr == pBlock  || 0 == size || size > ServerConfig::MAX_SMALL_OBJECT_SIZE)
+        if(nullptr == pPayload  || 0 == size || size > ServerConfig::MAX_SMALL_OBJECT_SIZE)
         {
             return ;
         }
 
         std::size_t index = ((size + POOL_ALIGNMENT - 1) / POOL_ALIGNMENT) - 1;
         CHECK(index < num_pools_);
-        pools_[index].Deallocate(pBlock);
+        pools_[index].Deallocate(pPayload);
     }
 }

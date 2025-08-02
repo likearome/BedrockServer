@@ -120,7 +120,7 @@ namespace BedrockServer::Core::Memory
         if (this != &other)
         {
             // Release our own resource first.
-            delete[] memory_chunk_;
+            std::free(memory_chunk_);
 
             // Steal resources from the other object.
             memory_chunk_ = other.memory_chunk_;

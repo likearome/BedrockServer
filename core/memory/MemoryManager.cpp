@@ -51,12 +51,11 @@ namespace BedrockServer::Core::Memory
 
         // Read the original user size from the header.
         std::size_t userSize = *reinterpret_cast<std::size_t*>(pBlock);
-        std::size_t totalSize = userSize + ALLOC_HEADER_SIZE;
 
-        if (totalSize <= ServerConfig::MAX_SMALL_OBJECT_SIZE)
+        if (userSize + ALLOC_HEADER_SIZE <= ServerConfig::MAX_SMALL_OBJECT_SIZE)
         {
             // Route the deallocation back to the small object allocator.
-            small_obj_alloc_.Deallocate(pBlock, totalSize);
+            small_obj_alloc_.Deallocate(pPayload, userSize);
         }
         else
         {
