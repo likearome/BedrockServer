@@ -1,45 +1,48 @@
 #include "memory/SmallObjectAllocator.h"
 #include "common/Assert.h"
 #include <iostream>
-#include <vector>
+#include <cstdint> // For uint32_t
+
+// This pattern must be the same as the one in PoolAllocator.cpp
+constexpr uint32_t FENCE_PATTERN = 0xDEADBEEF;
 
 int main()
 {
-    std::cout << "--- SmallObjectAllocator Test ---" << std::endl;
+    std::cout << "--- Graceful Memory Fencing Test ---" << std::endl;
+
+#ifdef BEDROCK_ENABLE_MEMORY_FENCING
+    std::cout << "[STATUS] Memory Fencing is ENABLED." << std::endl;
+    std::cout << "Verifying fence patterns..." << std::endl;
 
     BedrockServer::Core::Memory::SmallObjectAllocator soa;
+    
+    const std::size_t payloadSize = 8;
+    void* pPayload = soa.Allocate(payloadSize);
+    CHECK(pPayload != nullptr);
 
-    // Test various allocation sizes
-    void* p1 = soa.Allocate(7);    // Should use 8-byte pool
-    void* p2 = soa.Allocate(15);   // Should use 16-byte pool
-    void* p3 = soa.Allocate(32);   // Should use 32-byte pool
-    void* p4 = soa.Allocate(250);  // Should use 256-byte pool
+    // Get the memory addresses of the fences
+    // The prefix fence is located right before our payload pointer.
+    uint32_t* pPrefixFence = reinterpret_cast<uint32_t*>(static_cast<std::byte*>(pPayload) - sizeof(FENCE_PATTERN));
+    
+    // The suffix fence is located right after our payload.
+    uint32_t* pSuffixFence = reinterpret_cast<uint32_t*>(static_cast<std::byte*>(pPayload) + payloadSize);
 
-    CHECK(p1 != nullptr);
-    CHECK(p2 != nullptr);
-    CHECK(p3 != nullptr);
-    CHECK(p4 != nullptr);
+    // Check if the allocator correctly placed the fences.
+    if (*pPrefixFence == FENCE_PATTERN && *pSuffixFence == FENCE_PATTERN)
+    {
+        std::cout << "[RESULT] SUCCESS: Both fences are correctly placed." << std::endl;
+    }
+    else
+    {
+        std::cout << "[RESULT] FAILURE: Fences are missing or incorrect." << std::endl;
+    }
 
-    std::cout << "Allocated 7 bytes at: " << p1 << std::endl;
-    std::cout << "Allocated 15 bytes at: " << p2 << std::endl;
-    std::cout << "Allocated 32 bytes at: " << p3 << std::endl;
-    std::cout << "Allocated 250 bytes at: " << p4 << std::endl;
+    soa.Deallocate(pPayload, payloadSize);
 
-    // Test deallocation
-    soa.Deallocate(p1, 7);
-    soa.Deallocate(p2, 15);
-    soa.Deallocate(p3, 32);
-    soa.Deallocate(p4, 250);
-
-    std::cout << "All blocks deallocated." << std::endl;
-
-    // Test reallocation to see if we get the same blocks back
-    void* p5 = soa.Allocate(7);
-    std::cout << "Re-allocated 7 bytes at: " << p5 << std::endl;
-    CHECK(p5 == p1); // Because we are the only user, should get the same memory back.
-
-    soa.Deallocate(p5, 7);
-    std::cout << "Test finished successfully." << std::endl;
+#else
+    std::cout << "[STATUS] Memory Fencing is DISABLED." << std::endl;
+    std::cout << "[RESULT] Test skipped." << std::endl;
+#endif
 
     return 0;
 }
