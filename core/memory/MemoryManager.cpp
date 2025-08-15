@@ -55,7 +55,7 @@ namespace BedrockServer::Core::Memory
         if (userSize + ALLOC_HEADER_SIZE <= ServerConfig::MAX_SMALL_OBJECT_SIZE)
         {
             // Route the deallocation back to the small object allocator.
-            small_obj_alloc_.Deallocate(pPayload, userSize);
+            small_obj_alloc_.Deallocate(pBlock, userSize + ALLOC_HEADER_SIZE);
         }
         else
         {
