@@ -21,6 +21,6 @@ namespace BedrockServer::Core::Common
         ThreadRegistry(ThreadRegistry &&) = delete;
         ThreadRegistry& operator=(ThreadRegistry&&) = delete;
 
-        std::atomic<uint32_t> next_thread_id_ = 0;
+        std::atomic<uint32_t> NextThreadId = 0;
     };
 }

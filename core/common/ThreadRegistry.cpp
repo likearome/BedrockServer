@@ -10,6 +10,6 @@ namespace BedrockServer::Core::Common
 
     uint32_t ThreadRegistry::GetNewThreadId()
     {
-        return next_thread_id_.fetch_add(1);
+        return NextThreadId.fetch_add(1);
     }
 }

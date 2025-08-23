@@ -28,6 +28,6 @@ namespace BedrockServer::Core::Memory
 
         // alignas(64) prevents false sharing between threads on different cores.
         // We now have an array of allocators, one for each thread.
-        alignas(64) std::array<SmallObjectAllocator, ServerConfig::MAX_THREADS> thread_allocators_;
+        alignas(64) std::array<SmallObjectAllocator, ServerConfig::MAX_THREADS> ThreadAllocator;
     };
 }

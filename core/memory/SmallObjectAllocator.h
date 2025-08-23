@@ -4,9 +4,8 @@
 
 namespace BedrockServer::Core::Memory
 {
-    /// @class SmallObjectAllocator
-    /// @brief Manages multiple pools to handle allocations for various small object sizes.
-    /// Acts as a facade over a series of PoolAllocator instances.
+    // Manages multiple pools to handle allocations for various small object sizes.
+    // Acts as a facade over a series of PoolAllocator instances.
     class SmallObjectAllocator
     {
     public:
@@ -22,7 +21,6 @@ namespace BedrockServer::Core::Memory
 
     private:
         // We will have pools for 8 * n = 8, 16, 24, 32, 40, 48, ...
-        PoolAllocator* pools_ = nullptr;
-        std::size_t num_pools_ = 0;
+        PoolAllocator* pPools = nullptr;
     };
 }

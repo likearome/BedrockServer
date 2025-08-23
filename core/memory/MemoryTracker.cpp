@@ -18,7 +18,7 @@ namespace BedrockServer::Core::Memory
             return;
         }
 
-        auto& allocations = thread_data_[threadId].allocations;
+        auto& allocations = ThreadData[threadId].allocations;
         CHECK(allocations.find(p) == allocations.end());
         allocations[p] = {size, file, line};
     }
@@ -30,7 +30,7 @@ namespace BedrockServer::Core::Memory
             return;
         }
 
-        auto& allocations = thread_data_[threadId].allocations;
+        auto& allocations = ThreadData[threadId].allocations;
         CHECK(allocations.erase(p) == 1);
     }
     void MemoryTracker::ReportLeaks()
@@ -45,7 +45,7 @@ namespace BedrockServer::Core::Memory
         //Iterate through the data for all possible threads.
         for(uint32_t i = 0; i < ServerConfig::MAX_THREADS; ++i)
         {
-            const auto& allocations = thread_data_[i].allocations;
+            const auto& allocations = ThreadData[i].allocations;
             if(allocations.empty())
             {
                 continue;

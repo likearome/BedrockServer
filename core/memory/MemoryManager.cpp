@@ -30,7 +30,7 @@ namespace BedrockServer::Core::Memory
             // Get the ID of the current thread.
             uint32_t threadId = BedrockServer::Core::Common::GetThreadId();
             // Use the thread-specific allocator from the array.
-            pBlock = static_cast<std::byte*>(thread_allocators_[threadId].Allocate(totalSize));
+            pBlock = static_cast<std::byte*>(ThreadAllocator[threadId].Allocate(totalSize));
         }
         else
         {
@@ -86,7 +86,7 @@ namespace BedrockServer::Core::Memory
             // Get the ID of the current thread.
             uint32_t threadId = BedrockServer::Core::Common::GetThreadId();
             // Route the deallocation back to the small object allocator.
-            thread_allocators_[threadId].Deallocate(pBlock, userSize + ALLOC_HEADER_SIZE);
+            ThreadAllocator[threadId].Deallocate(pBlock, userSize + ALLOC_HEADER_SIZE);
         }
         else
         {

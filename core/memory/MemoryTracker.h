@@ -55,6 +55,6 @@ namespace BedrockServer::Core::Memory
         MemoryTracker() = default;
         ~MemoryTracker() = default;
         
-        std::array<PerThreadData, ServerConfig::MAX_THREADS> thread_data_;
+        std::array<PerThreadData, ServerConfig::MAX_THREADS> ThreadData;
     };
 }
