@@ -10,3 +10,6 @@ namespace BedrockServer::Core
         static constexpr std::size_t MAX_SMALL_OBJECT_SIZE = 256;
     };
 }
+
+// Enable it if you want to enable memory shrinking
+//#define BEDROCK_ENABLE_MEMORY_SHRINK
