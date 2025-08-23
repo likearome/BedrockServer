@@ -3,6 +3,7 @@
 #include<new>
 #include<cstdint>
 #include<cstdlib>
+#include<sys/mman.h>
 
 #ifdef BEDROCK_ENABLE_MEMORY_FENCING
 namespace
@@ -28,9 +29,18 @@ namespace BedrockServer::Core::Memory
         CHECK(payload_size_ >= sizeof(FreeNode));
         CHECK(block_count_ > 0);
 
-        //memory_chunk_ = new std::byte[block_size_ * block_count_];
-        memory_chunk_ = static_cast<std::byte*>(std::malloc(block_size_ * block_count_));
-        CHECK(memory_chunk_ != nullptr);
+        // Use mmap to request a large chunk of memory directly from the OS kernel.
+        const std::size_t total_size = block_size_ * block_count_;
+        void* p_mem = mmap(
+            nullptr,                      // let the kernel choose the address
+            total_size,                   // size to allocate
+            PROT_READ | PROT_WRITE,       // memory protection: readable and writable
+            MAP_PRIVATE | MAP_ANONYMOUS,  // not backed by a file, not shared with other processes
+            -1,                           // file descriptor (none for anonymous mapping)
+            0                             // offset (none for anonymous mapping)
+        );
+        CHECK(p_mem != nullptr);
+        memory_chunk_ = static_cast<std::byte*>(p_mem);
 
         // initialize the free list using placement new
         // constructs a FreeNode at the start of memory_chunk_
@@ -52,7 +62,12 @@ namespace BedrockServer::Core::Memory
 
     PoolAllocator::~PoolAllocator()
     {
-        std::free(memory_chunk_);
+        if (memory_chunk_ != nullptr)
+        {
+            // Return the memory chunk to the OS kernel.
+            const std::size_t total_size = block_size_ * block_count_;
+            munmap(memory_chunk_, total_size);
+        }
     }
 
     void* PoolAllocator::Allocate()

@@ -25,8 +25,12 @@ target_link_libraries(BedrockServer PRIVATE bedrock_core)
 target_compile_definitions(BedrockServer PRIVATE $<$<CONFIG:Debug>:_DEBUG>)
 target_compile_definitions(bedrock_core PRIVATE $<$<CONFIG:Debug>:_DEBUG>)
 
+# Add NDEBUG definition for Release builds to disable asserts
+target_compile_definitions(BedrockServer PRIVATE $<$<CONFIG:Release>:NDEBUG>)
+target_compile_definitions(bedrock_core PRIVATE $<$<CONFIG:Release>:NDEBUG>)
+
 # Add an option to control memory fencing (default is ON for debug builds)
-option(ENABLE_MEMORY_FENCING "Enable memory fencing check for debugging" ON)
+option(ENABLE_MEMORY_FENCING "Enable memory fencing check for debugging" OFF)
 
 if(ENABLE_MEMORY_FENCING)
     # Pass the definition to all targets

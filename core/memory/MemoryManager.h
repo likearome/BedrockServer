@@ -1,5 +1,7 @@
 #pragma once
-#include "memory/SmallObjectAllocator.h"
+#include<array>
+#include"memory/SmallObjectAllocator.h"
+#include"common/ServerConfig.h"
 
 namespace BedrockServer::Core::Memory
 {
@@ -17,12 +19,15 @@ namespace BedrockServer::Core::Memory
         MemoryManager& operator=(MemoryManager&&) = delete;
 
         void* Allocate(std::size_t size);
+        void* Allocate(std::size_t size, std::align_val_t al);
         void Deallocate(void* p);
 
     private:
         MemoryManager() = default;
         ~MemoryManager() = default;
 
-        SmallObjectAllocator small_obj_alloc_;
+        // alignas(64) prevents false sharing between threads on different cores.
+        // We now have an array of allocators, one for each thread.
+        alignas(64) std::array<SmallObjectAllocator, ServerConfig::MAX_THREADS> thread_allocators_;
     };
 }
