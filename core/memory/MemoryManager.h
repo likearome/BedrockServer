@@ -1,6 +1,7 @@
 #pragma once
 #include<array>
 #include"memory/SmallObjectAllocator.h"
+#include"memory/LargeObjectAllocator.h"
 #include"common/ServerConfig.h"
 
 namespace BedrockServer::Core::Memory
@@ -29,5 +30,9 @@ namespace BedrockServer::Core::Memory
         // alignas(64) prevents false sharing between threads on different cores.
         // We now have an array of allocators, one for each thread.
         alignas(64) std::array<SmallObjectAllocator, ServerConfig::MAX_THREADS> ThreadAllocator;
+
+        // Add an allocator for large objects.
+        // It is thread-safe because the class is stateless and its underlying OS calls are gueranteed to be safe.
+        LargeObjectAllocator LargeObjectAlloc;
     };
 }

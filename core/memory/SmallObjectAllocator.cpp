@@ -3,6 +3,7 @@
 #include "common/ServerConfig.h"
 #include <cstdlib>
 #include <new>
+#include <sys/mman.h>
 
 namespace
 {
@@ -21,9 +22,10 @@ namespace BedrockServer::Core::Memory
     
     SmallObjectAllocator::SmallObjectAllocator()
     {
-        // Use std::malloc to avoid calling our global `new` during initialization.
-        void* pMemory = std::malloc(NUM_POOLS * sizeof(PoolAllocator));
-        CHECK(pMemory != nullptr);
+        // Use mmap to request memory directly from the OS kernel.
+        const std::size_t totalSize = NUM_POOLS * sizeof(PoolAllocator);
+        void *pMemory = mmap(nullptr, totalSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        CHECK(pMemory != MAP_FAILED);
         
         pPools = static_cast<PoolAllocator*>(pMemory);
 
@@ -44,7 +46,8 @@ namespace BedrockServer::Core::Memory
         }
         
         // Free the raw memory.
-        std::free(pPools);
+        const std::size_t totalSize = NUM_POOLS * sizeof(PoolAllocator);
+        munmap(pPools, totalSize);
     }
 
     void* SmallObjectAllocator::Allocate(std::size_t size)
