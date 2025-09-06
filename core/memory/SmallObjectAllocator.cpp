@@ -8,9 +8,7 @@
 namespace
 {
     // POOL CONFIGURATION
-    
-    // All allocation sizes are aligned to this value.
-    constexpr std::size_t POOL_ALIGNMENT = 8;
+
     // How many blocks for each pool. e.g. 8-byte pool has 1024 blocks.
     constexpr std::size_t NUM_BLOCKS_PER_POOL = 1024;
 }
@@ -18,7 +16,7 @@ namespace
 namespace BedrockServer::Core::Memory
 {
     // Calculate the number of pools at compile time.
-    constexpr std::size_t NUM_POOLS = ServerConfig::MAX_SMALL_OBJECT_SIZE / POOL_ALIGNMENT;
+    constexpr std::size_t NUM_POOLS = ServerConfig::MAX_SMALL_OBJECT_SIZE / ServerConfig::POOL_ALIGNMENT;
     
     SmallObjectAllocator::SmallObjectAllocator()
     {
@@ -32,7 +30,7 @@ namespace BedrockServer::Core::Memory
         // Construct PoolAllocator objects in-place using placement new.
         for (std::size_t i = 0; i < NUM_POOLS; ++i)
         {
-            std::size_t payloadSize = (i + 1) * POOL_ALIGNMENT;
+            std::size_t payloadSize = (i + 1) * ServerConfig::POOL_ALIGNMENT;
             new (&pPools[i]) PoolAllocator(payloadSize, NUM_BLOCKS_PER_POOL);
         }
     }
@@ -61,7 +59,7 @@ namespace BedrockServer::Core::Memory
         // Calculate which pool to use from size
         // ex) size 1~8  -> pPools[0] (8bytes)
         // ex) size 9~16 -> pPools[1] (16bytes)
-        std::size_t index = ((size + POOL_ALIGNMENT - 1) / POOL_ALIGNMENT) - 1;
+        std::size_t index = ((size + ServerConfig::POOL_ALIGNMENT - 1) / ServerConfig::POOL_ALIGNMENT) - 1;
         CHECK(index < NUM_POOLS);
 
         return pPools[index].Allocate();
@@ -74,7 +72,7 @@ namespace BedrockServer::Core::Memory
             return;
         }
 
-        std::size_t index = ((size + POOL_ALIGNMENT - 1) / POOL_ALIGNMENT) - 1;
+        std::size_t index = ((size + ServerConfig::POOL_ALIGNMENT - 1) / ServerConfig::POOL_ALIGNMENT) - 1;
         CHECK(index < NUM_POOLS);
         pPools[index].Deallocate(pPayload);
     }

@@ -7,6 +7,8 @@ project(BedrockServer VERSION 1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g")
+
 # append this line for include core/memory to build
 add_subdirectory(core)
 
@@ -28,6 +30,9 @@ target_compile_definitions(bedrock_core PRIVATE $<$<CONFIG:Debug>:_DEBUG>)
 # Add NDEBUG definition for Release builds to disable asserts
 target_compile_definitions(BedrockServer PRIVATE $<$<CONFIG:Release>:NDEBUG>)
 target_compile_definitions(bedrock_core PRIVATE $<$<CONFIG:Release>:NDEBUG>)
+
+target_compile_options(BedrockServer PRIVATE -Wno-interference-size)
+target_compile_options(bedrock_core PRIVATE -Wno-interference-size)
 
 # Add an option to control memory fencing (default is ON for debug builds)
 option(ENABLE_MEMORY_FENCING "Enable memory fencing check for debugging" OFF)

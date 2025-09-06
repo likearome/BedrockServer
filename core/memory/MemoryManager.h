@@ -27,9 +27,9 @@ namespace BedrockServer::Core::Memory
         MemoryManager() = default;
         ~MemoryManager() = default;
 
-        // alignas(64) prevents false sharing between threads on different cores.
+        // alignas prevents false sharing between threads on different cores.
         // We now have an array of allocators, one for each thread.
-        alignas(64) std::array<SmallObjectAllocator, ServerConfig::MAX_THREADS> ThreadAllocator;
+        alignas(std::hardware_destructive_interference_size) std::array<SmallObjectAllocator, ServerConfig::MAX_THREADS> ThreadAllocator;
 
         // Add an allocator for large objects.
         // It is thread-safe because the class is stateless and its underlying OS calls are gueranteed to be safe.

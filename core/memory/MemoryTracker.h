@@ -33,7 +33,7 @@ namespace BedrockServer::Core::Memory
         /// @struct PerThreadData
         /// @brief Holds the allocation map for a single thread
         /// using alignas to prevent false sharing
-        struct alignas(64) PerThreadData
+        struct alignas(std::hardware_destructive_interference_size) PerThreadData
         {
             //std::map<void*, AllocationInfo> allocations;
             AllocationMap allocations;
