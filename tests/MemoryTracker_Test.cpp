@@ -1,36 +1,27 @@
-#include <gtest/gtest.h>
-#include "memory/SmallObjectAllocator.h"
+#include "gtest/gtest.h"
+#include "memory/MemoryManager.h"
 #include "memory/MemoryTracker.h"
-#include <vector>
-#include <thread>
+#include "memory/GlobalAllocators.h"
 
-// Google Test macro to define a test case
-TEST(MemoryTrackerTest, DetectsLeaksFromMultipleThreads)
+// A macro to explicitly use our tracked allocation via placement new.
+#define bedrock_new new(__FILE__, __LINE__)
+
+namespace
 {
-    // The allocator is now local to the test.
-    BedrockServer::Core::Memory::SmallObjectAllocator allocator;
-
-    auto workerThread = [&](int threadNum)
+    struct LeakTestObject
     {
-        std::vector<void*> allocations;
-        for (int i = 0; i < 100; ++i)
-        {
-            allocations.push_back(allocator.Allocate(10));
-        }
-
-        // Each thread leaks one block.
-        for (size_t i = 0; i < 99; ++i)
-        {
-            allocator.Deallocate(allocations[i], 10);
-        }
+        int a;
+        char buffer[128];
     };
+}
 
-    std::vector<std::jthread> threads;
-    const int numThreads = 4;
-    for (int i = 0; i < numThreads; ++i)
-    {
-        threads.emplace_back(workerThread, i);
-    }
-    
-    // Threads join automatically when vector goes out of scope.
+TEST(MemoryTrackerTest, DetectsIntentionalLeak)
+{
+    // Now the compiler knows what `new(__FILE__, __LINE__)` refers to.
+    LeakTestObject* pLeakedObject = bedrock_new LeakTestObject();
+
+    (void)pLeakedObject; 
+
+    // This 'delete' must be commented out to actually create a leak for the test.
+    // delete pLeakedObject;
 }

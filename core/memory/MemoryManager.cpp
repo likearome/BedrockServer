@@ -1,97 +1,140 @@
-#include"memory/MemoryManager.h"
-#include"common/ServerConfig.h"
-#include"common/ThreadId.h"
-#include<cstdlib>
-#include<cstring>
+#include "memory/MemoryManager.h"
+#include "memory/ThreadHeap.h"
+#include "memory/CentralHeap.h"
+#include "memory/MemoryUtil.h"
+#include "common/ServerConfig.h"
+#include <mutex>
+#include <sys/mman.h>
+#include <cstddef>
+#include <cstdlib>
+#include <new>
 
 namespace BedrockServer::Core::Memory
 {
-    namespace 
+    struct LargeAllocHeader
     {
-        constexpr std::size_t ALLOC_HEADER_SIZE = sizeof(std::size_t);
+        static constexpr uint64_t MAGIC = 0xDEADBEEFABADCAFE;
+        uint64_t Magic;
+        std::size_t TotalSize;
+    };
+    
+    std::once_flag g_initFlag;
+    CentralHeap* g_pCentralHeap = nullptr;
+
+    void MemoryManager::Initialize()
+    {
+        void* pMemory = std::malloc(sizeof(CentralHeap));
+        if (pMemory == nullptr) return;
+        
+        g_pCentralHeap = new (pMemory) CentralHeap();
+        CentralHeap::SetInstance(g_pCentralHeap);
+    }
+
+    void MemoryManager::Shutdown()
+    {
+        // This is intentionally left empty to prevent shutdown crashes.
+        // The OS will reclaim the memory of the CentralHeap singleton.
+    }
+    
+    void EnsureInitialized()
+    {
+        std::call_once(g_initFlag, MemoryManager::Initialize);
     }
 
     MemoryManager& MemoryManager::GetInstance()
     {
+        EnsureInitialized();
         static MemoryManager instance;
         return instance;
     }
 
     void* MemoryManager::Allocate(std::size_t userSize)
     {
+        EnsureInitialized();
+
         if (userSize == 0) return nullptr;
 
-        // Calculate the total size needed, including our header.
-        std::size_t totalSize = userSize + ALLOC_HEADER_SIZE;
-        std::byte* pBlock = nullptr;
-
-        if (totalSize <= ServerConfig::MAX_SMALL_OBJECT_SIZE)
+        if (userSize <= ServerConfig::MAX_SMALL_OBJECT_SIZE)
         {
-            // Get the ID of the current thread.
-            uint32_t threadId = BedrockServer::Core::Common::GetThreadId();
-            // Use the thread-specific allocator from the array.
-            pBlock = static_cast<std::byte*>(ThreadAllocator[threadId].Allocate(totalSize));
-        }
-        else
-        {
-            // Fallback to the system allocator for large allocations.
-            pBlock = static_cast<std::byte*>(std::malloc(totalSize));
+            return GetCurrentThreadHeap()->Allocate(userSize);
         }
 
-        if (pBlock == nullptr) return nullptr;
+        const std::size_t totalSize = userSize + sizeof(LargeAllocHeader);
+#ifdef __SANITIZE_THREAD__
+        void* pBlock = std::malloc(totalSize);
+#else
+        void* pBlock = mmap(nullptr, totalSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+#endif
+        if (pBlock == MAP_FAILED) return nullptr;
 
-        *reinterpret_cast<std::size_t*>(pBlock) = userSize;
+        LargeAllocHeader* pHeader = static_cast<LargeAllocHeader*>(pBlock);
+        pHeader->Magic = LargeAllocHeader::MAGIC;
+        pHeader->TotalSize = totalSize;
         
-        // return after header
-        return pBlock + ALLOC_HEADER_SIZE;
+        return static_cast<std::byte*>(pBlock) + sizeof(LargeAllocHeader);
     }
+
     void* MemoryManager::Allocate(std::size_t userSize, std::align_val_t al)
     {
-        if (userSize == 0) return nullptr;
-
-        // For aligned requests, we bypass the small object allocator and go to the system.
-        std::size_t alignment = static_cast<std::size_t>(al);
-        std::size_t totalSize = userSize + ALLOC_HEADER_SIZE;
+        EnsureInitialized();
+        const std::size_t alignment = static_cast<std::size_t>(al);
+        const std::size_t totalSize = userSize + sizeof(LargeAllocHeader) + alignment;
         
-        void* pBlockRaw = nullptr;
-        // posix_memalign is the standard way to get aligned memory on Linux/Debian.
-        if (posix_memalign(&pBlockRaw, alignment, totalSize) != 0)
-        {
-            return nullptr; // Allocation failed.
-        }
-        std::byte* pBlock = static_cast<std::byte*>(pBlockRaw);
+#ifdef __SANITIZE_THREAD__
+        void* pBlock = std::malloc(totalSize);
+#else
+        void* pBlock = mmap(nullptr, totalSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+#endif
+        if (pBlock == MAP_FAILED) return nullptr;
+        
+        void* pPayload = reinterpret_cast<void*>(
+            (reinterpret_cast<uintptr_t>(pBlock) + sizeof(LargeAllocHeader) + (alignment - 1)) & ~(alignment - 1)
+        );
+        
+        LargeAllocHeader* pHeader = reinterpret_cast<LargeAllocHeader*>(static_cast<std::byte*>(pPayload) - sizeof(LargeAllocHeader));
+        pHeader->Magic = LargeAllocHeader::MAGIC;
+        pHeader->TotalSize = totalSize;
 
-        if (pBlock == nullptr) return nullptr;
-
-        // Write the original user size into the header.
-        *reinterpret_cast<std::size_t*>(pBlock) = userSize;
-
-        // Return the address right after the header to the user.
-        return pBlock + ALLOC_HEADER_SIZE;
+        return pPayload;
     }
 
     void MemoryManager::Deallocate(void* pPayload)
     {
+        EnsureInitialized();
         if (pPayload == nullptr) return;
 
-        // Get the original block address by moving the pointer back.
-        std::byte* pBlock = static_cast<std::byte*>(pPayload) - ALLOC_HEADER_SIZE;
+        LargeAllocHeader* pHeader = reinterpret_cast<LargeAllocHeader*>(
+            static_cast<std::byte*>(pPayload) - sizeof(LargeAllocHeader));
 
-        // Read the original user size from the header.
-        std::size_t userSize; 
-        std::memcpy(&userSize, pBlock, sizeof(userSize));
-
-        if (userSize + ALLOC_HEADER_SIZE <= ServerConfig::MAX_SMALL_OBJECT_SIZE)
+        if (pHeader->Magic == LargeAllocHeader::MAGIC)
         {
-            // Get the ID of the current thread.
-            uint32_t threadId = BedrockServer::Core::Common::GetThreadId();
-            // Route the deallocation back to the small object allocator.
-            ThreadAllocator[threadId].Deallocate(pBlock, userSize + ALLOC_HEADER_SIZE);
-        }
-        else
-        {
-            // Route the deallocation back to the system's free().
+            void* pBlock = static_cast<void*>(pHeader);
+            const std::size_t totalSize = pHeader->TotalSize;
+            pHeader->Magic = 0; // Prevent double-free
+#ifdef __SANITIZE_THREAD__
             std::free(pBlock);
+#else
+            munmap(pBlock, totalSize);
+#endif
+            return;
         }
+
+        MemoryPage* pPage = GetPageFromPointer(pPayload);
+
+        // This is the crucial ID check.
+        // We verify if the page this pointer belongs to is a valid page we created.
+        if (pPage->Magic == MemoryPage::MAGIC)
+        {
+            // If it is our page, proceed with deallocation.
+            if (pPage->pOwnerHeap != nullptr)
+            {
+                pPage->pOwnerHeap->Deallocate(pPayload);
+            }
+            return;
+        }
+        
+        // If the magic number does not match, this is a "foreign" pointer
+        // from a source like the standard library.
+        // To prevent a crash, we must not process it. We simply ignore it.
     }
 }

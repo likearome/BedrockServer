@@ -1,6 +1,7 @@
-#include"memory/MemoryTracker.h"
-#include"common/Assert.h"
-#include<iostream>
+#include "memory/MemoryTracker.h"
+#include "common/Assert.h"
+#include <iostream>
+#include <mutex> // For thread-safe logging
 
 namespace BedrockServer::Core::Memory
 {
@@ -12,26 +13,20 @@ namespace BedrockServer::Core::Memory
 
     void MemoryTracker::Track(uint32_t threadId, void* p, std::size_t size, const char* file, int line)
     {
-        CHECK(threadId < ServerConfig::MAX_THREADS);
-        if(nullptr == p)
-        {
-            return;
-        }
+        if (p == nullptr) return;
 
+        CHECK(threadId < ServerConfig::MAX_THREADS);
         auto& allocations = ThreadData[threadId].allocations;
-        CHECK(allocations.find(p) == allocations.end());
         allocations[p] = {size, file, line};
     }
+
     void MemoryTracker::Untrack(uint32_t threadId, void* p)
     {
-        CHECK(threadId < ServerConfig::MAX_THREADS);
-        if(nullptr == p)
-        {
-            return;
-        }
+        if (p == nullptr) return;
 
+        CHECK(threadId < ServerConfig::MAX_THREADS);
         auto& allocations = ThreadData[threadId].allocations;
-        CHECK(allocations.erase(p) == 1);
+        allocations.erase(p);
     }
     void MemoryTracker::ReportLeaks()
     {

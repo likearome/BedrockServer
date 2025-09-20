@@ -17,6 +17,8 @@ namespace BedrockServer::Core::Memory
         void* Allocate(std::size_t size);
         void Deallocate(void* pPayload);
         void ProcessDeferredFrees();
+    private:
+        void FreeBlockInternal(void* pPayload);
         void ReturnPageIfEmpty(MemoryPage* pPage);
 
     private:
@@ -30,4 +32,7 @@ namespace BedrockServer::Core::Memory
         // A queue for deferred frees from other threads.
         Common::ConcurrentQueue<void*> DeferredFreeQueue; 
     };
+
+    // Forward declaration of the helper function defined in ThreadHeap.cpp
+    ThreadHeap* GetCurrentThreadHeap();
 }

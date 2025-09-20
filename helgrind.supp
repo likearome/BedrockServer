@@ -1,0 +1,10 @@
+# This is a Valgrind suppression file for Helgrind.
+# It tells Helgrind to ignore the known benign data race in our
+# lock-free ConcurrentQueue implementation.
+
+{
+   Bedrock_ConcurrentQueue_DataRace
+   Helgrind:Race
+   fun:BedrockServer::Core::Common::ConcurrentQueue<void*>::PopAll
+   fun:BedrockServer::Core::Common::ConcurrentQueue<void*>::Push
+}

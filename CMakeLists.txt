@@ -6,8 +6,9 @@ cmake_policy(SET CMP0135 NEW)
 project(BedrockServer VERSION 1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g")
+# A global option to control Sanitizers
+option(ENABLE_TSAN "Enable ThreadSanitizer for debugging" OFF)
 
 # append this line for include core/memory to build
 add_subdirectory(core)
@@ -19,6 +20,20 @@ target_sources(BedrockServer
     PRIVATE
     core/memory/GlobalAllocators.cpp
 )
+
+target_include_directories(BedrockServer PRIVATE ${googletest_SOURCE_DIR}/include)
+
+if(ENABLE_TSAN)
+    message(STATUS "ThreadSanitizer (TSan) is enabled for all targets.")
+    
+    # Add compile options to the core library and the main executable.
+    target_compile_options(bedrock_core PRIVATE -fsanitize=thread -g)
+    target_compile_options(BedrockServer PRIVATE -fsanitize=thread -g)
+    
+    # Add link options. Using INTERFACE on the library propagates the link
+    # requirement to any target that links it (like BedrockServer and run_tests).
+    target_link_options(bedrock_core INTERFACE -fsanitize=thread)
+endif()
 
 # link bedrock_memory library to BedrockServer executable
 target_link_libraries(BedrockServer PRIVATE bedrock_core)

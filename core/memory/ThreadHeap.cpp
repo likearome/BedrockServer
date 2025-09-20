@@ -1,43 +1,47 @@
 #include "memory/ThreadHeap.h"
 #include "memory/CentralHeap.h"
-#include "common/ServerConfig.h"
+#include "memory/MemoryUtil.h"
+#include "common/ConcurrentQueue.h"
 #include "common/Assert.h"
 #include <new>
-
-namespace
-{
-    // Helper function to find the start of the page from any pointer within it.
-    BedrockServer::Core::Memory::MemoryPage* GetPageFromPointer(void* p)
-    {
-        static_assert(std::has_single_bit(BedrockServer::Core::ServerConfig::PAGE_SIZE), "PAGE_SIZE must be a power of two.");
-        return reinterpret_cast<BedrockServer::Core::Memory::MemoryPage*>(
-            reinterpret_cast<uintptr_t>(p) & ~(BedrockServer::Core::ServerConfig::PAGE_SIZE - 1)
-        );
-    }
-}
+#include <cstdlib> // For std::malloc
 
 namespace BedrockServer::Core::Memory
 {
-    // A global, thread-local pointer for fast access to the current thread's heap.
-    thread_local ThreadHeap* pCurrentThreadHeap = nullptr;
+    // A thread-local pointer to each thread's own heap instance.
+    thread_local ThreadHeap* g_pCurrentThreadHeap = nullptr;
 
-    ThreadHeap::ThreadHeap()
+    // Flag to ensure the heap is created only once per thread.
+    thread_local bool g_isThreadHeapInitialized = false;
+
+    ThreadHeap* GetCurrentThreadHeap()
     {
-        pCurrentThreadHeap = this;
-        Pages.fill(nullptr);
+        // This is the modern C++ way to create a thread-local singleton.
+        // The 'instance' object is constructed automatically on first use for each thread.
+        // When the thread exits, its destructor is called and its memory is
+        // reclaimed automatically by the C++ runtime.
+        thread_local ThreadHeap instance;
+        return &instance;
     }
 
+    // --- ThreadHeap Member Function Implementations ---
+    
+    ThreadHeap::ThreadHeap() { Pages.fill(nullptr); }
     ThreadHeap::~ThreadHeap()
     {
-        // When a thread exits, its ThreadHeap is destroyed.
-        // We must return all cached pages back to the CentralHeap.
-        for (size_t i = 0; i < Pages.size(); ++i)
+        // When a thread exits, its ThreadHeap instance is destroyed.
+        // We must return all the memory pages it was holding back to the CentralHeap.
+        // If we don't, these pages are orphaned and all allocations within them
+        // will be reported as memory leaks.
+        ProcessDeferredFrees();
+
+        for (size_t i = 0; i < NumSizeClasses; ++i)
         {
             MemoryPage* pPage = Pages[i];
             while (pPage != nullptr)
             {
                 MemoryPage* pNext = pPage->pLocalNext;
-                CentralHeap::GetInstance().ReturnPage(pPage);
+                CentralHeap::GetInstance()->ReturnPage(pPage);
                 pPage = pNext;
             }
         }
@@ -45,153 +49,105 @@ namespace BedrockServer::Core::Memory
 
     void* ThreadHeap::Allocate(std::size_t size)
     {
-        // A counter for the adaptive spin-wait.
-        constexpr int SPIN_COUNT_BEFORE_YIELD = 5000;
-        int spinCount = 0;
-
-        const std::size_t sizeClassIndex = (size + ServerConfig::POOL_ALIGNMENT - 1) / ServerConfig::POOL_ALIGNMENT -1;
+        const std::size_t sizeClassIndex = (size + ServerConfig::POOL_ALIGNMENT - 1) / ServerConfig::POOL_ALIGNMENT - 1;
         CHECK(sizeClassIndex < NumSizeClasses);
 
-        while (true) // Top-level loop to retry allocation
+        while (true)
         {
             MemoryPage* pPage = Pages[sizeClassIndex];
-            
-            // 1. Check if we have a usable page.
-            if (pPage != nullptr && pPage->pFreeList.load() != nullptr)
+            if (pPage != nullptr)
             {
-                // 2. Try to allocate from the page's free list.
-                PageFreeBlock* pBlock = pPage->pFreeList.load();
-
-                // Since only this thread can pop from this list, we don't need a CAS loop.
-                // A simple atomic exchange is sufficient and faster.
-                PageFreeBlock* pNext = pBlock->pNext;
-                pPage->pFreeList.store(pNext); // A simple store might also work if ordering is guaranteed.
-
-                pPage->UsedBlocks.fetch_add(1);
-                return static_cast<void*>(pBlock);
+                PageFreeBlock* pCurrentHead = pPage->pFreeList.load(std::memory_order_acquire);
+                while (pCurrentHead != nullptr)
+                {
+                    PageFreeBlock* pNext = pCurrentHead->pNext;
+                    if (pPage->pFreeList.compare_exchange_weak(pCurrentHead, pNext, std::memory_order_acq_rel))
+                    {
+                        pPage->UsedBlocks.fetch_add(1, std::memory_order_relaxed);
+                        return static_cast<void*>(pCurrentHead);
+                    }
+                }
             }
 
-            // 3. If we are here, it means we have no page or the page is full.
-            //    Request a new page from the CentralHeap.
-            MemoryPage* pNewPage = CentralHeap::GetInstance().GetPage(sizeClassIndex);
+            MemoryPage* pNewPage = CentralHeap::GetInstance()->GetPage(sizeClassIndex);
             if (pNewPage != nullptr)
             {
                 pNewPage->pOwnerHeap = this;
+                const uint32_t blockSize = (sizeClassIndex + 1) * ServerConfig::POOL_ALIGNMENT;
+                const uint32_t numBlocks = (ServerConfig::PAGE_SIZE - sizeof(MemoryPage)) / blockSize;
+                
+                // Call the newly added InitFreeList function to prepare the page.
+                pNewPage->InitFreeList(numBlocks, blockSize);
+                
                 pNewPage->pLocalNext = Pages[sizeClassIndex];
                 Pages[sizeClassIndex] = pNewPage;
-                // Loop again to retry the allocation with the new page.
             }
             else
             {
-                return nullptr; // Truly out of memory.
-            }
-                    
-            // Adaptive spin-wait.
-            if (++spinCount > SPIN_COUNT_BEFORE_YIELD)
-            {
-                spinCount = 0;
-                std::this_thread::yield(); // Yield the CPU slice to other threads.
+                return nullptr;
             }
         }
     }
 
     void ThreadHeap::Deallocate(void* pPayload)
     {
-        // A counter for the adaptive spin-wait.
-        constexpr int SPIN_COUNT_BEFORE_YIELD = 5000;
-        int spinCount = 0;
-
         if (pPayload == nullptr) return;
-
-        // From the payload pointer, find the header of the page it belongs to.
         MemoryPage* pPage = GetPageFromPointer(pPayload);
-
-        // Get the current thread's heap.
-        ThreadHeap* pCurrentHeap = pCurrentThreadHeap; // Use the thread_local variable
-        CHECK(pCurrentHeap != nullptr);
-
-        // Check if the page is owned by the current thread's heap.
-        if (pPage->pOwnerHeap == pCurrentHeap) 
+        if (pPage->pOwnerHeap == this) 
         {
-            // --- Case 1: Same-thread deallocation (Fast Path) ---
-            // Just add the block back to the page's local free list.
-            PageFreeBlock* pBlock = static_cast<PageFreeBlock*>(pPayload);
-            
-            // Atomically push to the page's free list.
-            PageFreeBlock* pCurrentHead = pPage->pFreeList.load();
-            do {
-                // Adaptive spin-wait.
-                if (++spinCount > SPIN_COUNT_BEFORE_YIELD)
-                {
-                    spinCount = 0;
-                    std::this_thread::yield(); // Yield the CPU slice to other threads.
-                }
-
-                pBlock->pNext = pCurrentHead;
-            } while (!pPage->pFreeList.compare_exchange_weak(pCurrentHead, pBlock));
-
-            uint32_t prevUsed = pPage->UsedBlocks.fetch_sub(1);
-            if (prevUsed == 1) // This was the last block
-            {
-                ReturnPageIfEmpty(pPage);
-            }
+            FreeBlockInternal(pPayload);
         }
         else
         {
-            // --- Case 2: Cross-thread deallocation (Slow Path) ---
-            // Add the block to the original owner's deferred free queue.
-            // This requires a thread-safe queue implementation.
             pPage->pOwnerHeap->DeferredFreeQueue.Push(pPayload);
         }
     }
+
+    void ThreadHeap::FreeBlockInternal(void* pPayload)
+    {
+        MemoryPage* pPage = GetPageFromPointer(pPayload);
+        PageFreeBlock* pBlock = static_cast<PageFreeBlock*>(pPayload);
+
+        PageFreeBlock* pCurrentHead = pPage->pFreeList.load(std::memory_order_acquire);
+        do {
+            pBlock->pNext = pCurrentHead;
+        } while (!pPage->pFreeList.compare_exchange_weak(pCurrentHead, pBlock, std::memory_order_release));
+
+        if (pPage->UsedBlocks.fetch_sub(1, std::memory_order_acq_rel) == 1)
+        {
+            ReturnPageIfEmpty(pPage);
+        }
+    }
+
     void ThreadHeap::ProcessDeferredFrees()
     {
-        // A counter for the adaptive spin-wait.
-        constexpr int SPIN_COUNT_BEFORE_YIELD = 5000;
-        int spinCount = 0;
+        using Node = Common::ConcurrentQueue<void*>::Node;
+        Node* pFrees = DeferredFreeQueue.PopAll();
 
-        // Atomically grab the entire list of pending frees from other threads.
-        Common::ConcurrentQueue<void*>::Node* pFrees = DeferredFreeQueue.PopAll();
+        // MODIFICATION: Separate consumption from destruction.
 
-        // Now, process the list lock-free.
+        // Phase 1: Consume the list. Process data and collect nodes to delete.
+        Node* pHeadOfDeleteList = pFrees;
         while (pFrees != nullptr)
         {
-            void* pPayload = pFrees->Data;
-            
-            // This is a "local" deallocation now.
-            MemoryPage* pPage = GetPageFromPointer(pPayload);
-            PageFreeBlock* pBlock = static_cast<PageFreeBlock*>(pPayload);
-            
-            // Atomically push to the page's free list.
-            PageFreeBlock* pCurrentHead = pPage->pFreeList.load();
-            do {
-                // Adaptive spin-wait.
-                if (++spinCount > SPIN_COUNT_BEFORE_YIELD)
-                {
-                    spinCount = 0;
-                    std::this_thread::yield(); // Yield the CPU slice to other threads.
-                }
-                pBlock->pNext = pCurrentHead;
-            } while (!pPage->pFreeList.compare_exchange_weak(pCurrentHead, pBlock));
-            
-            uint32_t prevUsed = pPage->UsedBlocks.fetch_sub(1);
-            if (prevUsed == 1)
-            {
-                ReturnPageIfEmpty(pPage);
-            }
-            
-            // Move to the next item and delete the queue node.
-            auto* pOldNode = pFrees;
+            FreeBlockInternal(pFrees->Data);
             pFrees = pFrees->pNext;
+        }
+
+        // Phase 2: Destroy the nodes after traversal is complete.
+        while (pHeadOfDeleteList != nullptr)
+        {
+            auto* pOldNode = pHeadOfDeleteList;
+            pHeadOfDeleteList = pHeadOfDeleteList->pNext;
             delete pOldNode;
         }
     }
+
     void ThreadHeap::ReturnPageIfEmpty(MemoryPage* pPage)
     {
         const size_t sizeClassIndex = pPage->SizeClassIndex;
         MemoryPage*& pHead = Pages[sizeClassIndex];
 
-        // --- Unlink the page from this thread's local list ---
         if (pHead == pPage)
         {
             pHead = pPage->pLocalNext;
@@ -203,7 +159,6 @@ namespace BedrockServer::Core::Memory
             {
                 pCurrent = pCurrent->pLocalNext;
             }
-
             if (pCurrent != nullptr)
             {
                 pCurrent->pLocalNext = pPage->pLocalNext;
@@ -211,6 +166,6 @@ namespace BedrockServer::Core::Memory
         }
         
         pPage->pLocalNext = nullptr;
-        CentralHeap::GetInstance().ReturnPage(pPage);
+        CentralHeap::GetInstance()->ReturnPage(pPage);
     }
 }

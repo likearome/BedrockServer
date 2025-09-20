@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef _DEBUG
+#ifndef NDEBUG
     #include <cstddef>
 
     // Declare placement new operators to be used by the macro.

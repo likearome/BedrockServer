@@ -7,7 +7,6 @@ struct Vec3 { float x, y, z; };
 
 int main()
 {
-    /*
     std::cout << "--- Final Integration Test ---" << std::endl;
 
     // This 'new' will be replaced by our macro: new(__FILE__, __LINE__)
@@ -28,7 +27,6 @@ int main()
 
     // Report leaks at the end of the program.
     BedrockServer::Core::Memory::MemoryTracker::GetInstance().ReportLeaks();
-    */
 
     return 1;
 }
